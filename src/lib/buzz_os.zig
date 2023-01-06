@@ -31,8 +31,15 @@ export fn env(vm: *api.VM) c_int {
         return -1;
     }
 
-    if (std.os.getenvZ(key_slice.?)) |value| {
-        vm.bz_pushString(api.ObjString.bz_string(vm, if (value.len > 0) @ptrCast([*]const u8, value) else null, value.len) orelse {
+    const value: ?[]u8 = std.process.getEnvVarOwned(VM.allocator, key_slice) catch null;
+    defer {
+        if (value) |v| {
+            VM.allocator.free(v);
+        }
+    }
+
+    if (value) |uvalue| {
+        vm.bz_pushString(api.ObjString.bz_string(vm, if (uvalue.len > 0) @ptrCast([*]const u8, uvalue) else null, value.len) orelse {
             vm.bz_pushError("lib.errors.OutOfMemoryError", "lib.errors.OutOfMemoryError".len);
 
             return -1;

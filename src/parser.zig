@@ -4438,13 +4438,18 @@ pub const Parser = struct {
         var import: ?ScriptImport = self.imports.get(file_name);
 
         if (import == null) {
-            const buzz_path: []const u8 = std.os.getenv("BUZZ_PATH") orelse ".";
+            const buzz_path: ?[]const u8 = std.process.getEnvVarOwned(self.gc.allocator, "BUZZ_PATH") catch null;
+            defer {
+                if (buzz_path) |p| {
+                    self.gc.allocator.free(p);
+                }
+            }
 
             var lib_path = std.ArrayList(u8).init(self.gc.allocator);
             defer lib_path.deinit();
             _ = try lib_path.writer().print(
                 "{s}{s}{s}.buzz",
-                .{ buzz_path, std.fs.path.sep_str, file_name },
+                .{ buzz_path orelse ".", std.fs.path.sep_str, file_name },
             );
 
             var dir_path = std.ArrayList(u8).init(self.gc.allocator);
@@ -4569,7 +4574,12 @@ pub const Parser = struct {
 
     // TODO: when to close the lib?
     fn importLibSymbol(self: *Self, file_name: []const u8, symbol: []const u8) !?*ObjNative {
-        const buzz_path: []const u8 = std.os.getenv("BUZZ_PATH") orelse ".";
+        const buzz_path: ?[]const u8 = std.process.getEnvVarOwned(self.gc.allocator, "BUZZ_PATH") catch null;
+        defer {
+            if (buzz_path) |p| {
+                self.gc.allocator.free(p);
+            }
+        }
 
         // We have to insert `lib` prefix
         const last_sep = std.mem.lastIndexOf(u8, file_name, std.fs.path.sep_str) orelse 0;
@@ -4579,7 +4589,7 @@ pub const Parser = struct {
         try lib_path.writer().print(
             "{s}{s}{s}lib{s}.{s}",
             .{
-                buzz_path,
+                buzz_path orelse ".",
                 std.fs.path.sep_str,
                 file_name[0 .. last_sep + 1],
                 file_name[last_sep + 1 ..],
