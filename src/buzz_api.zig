@@ -1,12 +1,15 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const VM = @import("./vm.zig").VM;
+const _vm = @import("./vm.zig");
+const VM = _vm.VM;
+const TryCtx = _vm.TryCtx;
 const _obj = @import("./obj.zig");
 const _value = @import("./value.zig");
 const memory = @import("./memory.zig");
 const _parser = @import("./parser.zig");
 const _codegen = @import("./codegen.zig");
 const BuildOptions = @import("build_options");
+const jmp = @import("jmp.zig").jmp;
 
 const Value = _value.Value;
 const valueToStringAlloc = _value.valueToStringAlloc;
@@ -478,8 +481,22 @@ export fn bz_userDataToValue(userdata: *ObjUserData) Value {
     return userdata.toValue();
 }
 
+// Like bz_throw but assumes the error payload is already on the stack
+export fn bz_rethrow(vm: *VM) void {
+    // Are we in a JIT compiled function and within a try-catch?
+    if (vm.currentFrame().?.in_native_call and vm.current_fiber.try_context != null) {
+        const try_context = vm.current_fiber.try_context.?;
+
+        jmp.longjmp(try_context.env, 1);
+
+        unreachable;
+    }
+}
+
 export fn bz_throw(vm: *VM, value: Value) void {
     vm.push(value);
+
+    bz_rethrow(vm);
 }
 
 export fn bz_throwString(vm: *VM, message: ?[*]const u8, len: usize) void {
@@ -721,4 +738,22 @@ export fn bz_mapMethod(vm: *VM, map: Value, member: [*]const u8, member_len: usi
 
 export fn bz_valueIs(self: Value, type_def: Value) Value {
     return Value.fromBoolean(_value.valueIs(type_def, self));
+}
+
+export fn bz_setTryCtx(self: *VM, env: *jmp.jmp_buf) c_int {
+    var try_ctx = self.gc.allocator.create(TryCtx) catch @panic("Could not create try context");
+    try_ctx.* = .{
+        .previous = self.current_fiber.try_context,
+        .env = env,
+    };
+
+    self.current_fiber.try_context = try_ctx;
+
+    return jmp.setjmp(env);
+}
+
+export fn bz_popTryCtx(self: *VM) void {
+    if (self.current_fiber.try_context) |try_ctx| {
+        self.current_fiber.try_context = try_ctx.previous;
+    }
 }
